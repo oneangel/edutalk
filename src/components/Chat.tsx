@@ -322,30 +322,28 @@ export default function Chat() {
   // Function to update message state
   const updateMessageState = async (messageId: string, newState: string) => {
     try {
+      // Primero hacer la llamada a la API
       await api.patch(
         `https://edutalk-by8w.onrender.com/api/message/state/${messageId}`,
-        {
-          state: newState,
-        }
+        { state: newState }
       );
-
-      // Update the message state locally
+  
+      // Solo después de confirmación exitosa, actualizar la UI y emitir evento
       setMessages((prevMessages) =>
         prevMessages.map((msg) =>
           msg.id === messageId ? { ...msg, state: newState } : msg
         )
       );
-
-      // Emit socket event to notify other users of state change
+  
+      // Emitir el evento de socket con todos los datos necesarios
       socket.emit("chat.message.state", {
         message_id: messageId,
         state: newState,
         conversation_id: selectedConversation,
+        sender_id: userId // Añadir el ID del remitente es importante
       });
     } catch (err) {
       console.error("Error updating message state:", err);
-
-      // We don't set the error state here to avoid disrupting the UI for state updates
     }
   };
 
@@ -400,11 +398,20 @@ export default function Chat() {
 
     // Message handler function
     const handleNewMessage = (message: Message) => {
-      setMessages((prevMessages) => [...prevMessages, message]);
-
-      // If the message is from another user, mark it as seen
+      // Añade el mensaje solo si no existe ya
+      setMessages((prevMessages) => {
+        const exists = prevMessages.some(msg => msg.id === message.id);
+        if (!exists) {
+          return [...prevMessages, message];
+        }
+        return prevMessages;
+      });
+    
+      // Si el mensaje es de otro usuario, marca como visto
       if (message.sender_id !== userId) {
-        updateMessageState(message.id, "Seen");
+        setTimeout(() => {
+          updateMessageState(message.id, "Seen");
+        }, 500); // Pequeña demora para estabilidad
       }
     };
 
@@ -412,12 +419,19 @@ export default function Chat() {
     const handleMessageStateUpdate = (data: {
       message_id: string;
       state: string;
+      conversation_id: string;
+      sender_id: string;
     }) => {
-      setMessages((prevMessages) =>
-        prevMessages.map((msg) =>
-          msg.id === data.message_id ? { ...msg, state: data.state } : msg
-        )
-      );
+      // Solo actualizar si:
+      // 1. Es para la conversación actual
+      // 2. No es un evento que yo mismo envié (evita loops)
+      if (data.conversation_id === selectedConversation && data.sender_id !== userId) {
+        setMessages((prevMessages) =>
+          prevMessages.map((msg) =>
+            msg.id === data.message_id ? { ...msg, state: data.state } : msg
+          )
+        );
+      }
     };
 
     // Subscribe to the socket channels
